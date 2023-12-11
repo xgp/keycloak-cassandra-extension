@@ -16,10 +16,6 @@
 package de.arbeitsagentur.opdt.keycloak.cassandra;
 
 import com.google.auto.service.AutoService;
-import de.arbeitsagentur.opdt.keycloak.cassandra.client.CassandraClientProvider;
-import de.arbeitsagentur.opdt.keycloak.cassandra.clientScope.CassandraClientScopeProvider;
-import de.arbeitsagentur.opdt.keycloak.cassandra.group.CassandraGroupProvider;
-import de.arbeitsagentur.opdt.keycloak.cassandra.role.CassandraRoleProvider;
 import lombok.extern.jbosslog.JBossLog;
 import org.keycloak.Config;
 import org.keycloak.models.*;
@@ -27,15 +23,17 @@ import org.keycloak.provider.EnvironmentDependentProviderFactory;
 import org.keycloak.provider.InvalidationHandler;
 import org.keycloak.storage.DatastoreProvider;
 import org.keycloak.storage.DatastoreProviderFactory;
+import org.keycloak.storage.datastore.LegacyDatastoreProviderFactory;
 
-import static org.keycloak.models.map.common.AbstractMapProviderFactory.MapProviderObjectType.*;
+//import static org.keycloak.models.map.common.AbstractMapProviderFactory.MapProviderObjectType.*;
 
 @JBossLog
 @AutoService(DatastoreProviderFactory.class)
-public class CassandraMapDatastoreProviderFactory extends AbstractCassandraProviderFactory implements DatastoreProviderFactory, EnvironmentDependentProviderFactory, InvalidationHandler {
+public class CassandraMapDatastoreProviderFactory extends LegacyDatastoreProviderFactory {
+  //public class CassandraMapDatastoreProviderFactory extends LegacyDatastoreProviderFactory implements DatastoreProviderFactory, EnvironmentDependentProviderFactory, InvalidationHandler {
     private Config.Scope config;
 
-    private static final String PROVIDER_ID = "cassandra-map";
+    private static final String PROVIDER_ID = "cassandra-legacy";
 
     @Override
     public String getId() {
@@ -44,21 +42,14 @@ public class CassandraMapDatastoreProviderFactory extends AbstractCassandraProvi
 
     @Override
     public DatastoreProvider create(KeycloakSession session) {
-        return new CassandraMapDatastoreProvider(config, session, createRepository(session));
+      AbstractCassandraProviderFactory f = new AbstractCassandraProviderFactory() {};
+      return new CassandraMapDatastoreProvider(this, config, session, f.createRepository(session));
     }
 
     @Override
     public void init(Config.Scope scope) {
-        this.config = scope;
-    }
-
-    @Override
-    public void postInit(KeycloakSessionFactory keycloakSessionFactory) {
-    }
-
-    @Override
-    public void close() {
-
+      super.init(scope);
+      this.config = scope;
     }
 
     @Override
@@ -66,9 +57,10 @@ public class CassandraMapDatastoreProviderFactory extends AbstractCassandraProvi
         return true;
     }
 
-    @Override
+      /*
+   @Override
     public void invalidate(KeycloakSession session, InvalidableObjectType type, Object... params) {
-        if (type == REALM_BEFORE_REMOVE) {
+       if (type == REALM_BEFORE_REMOVE) {
             create(session).users().preRemove((RealmModel) params[0]);
             ((CassandraClientProvider) create(session).clients()).preRemove((RealmModel) params[0]);
             ((CassandraClientScopeProvider) create(session).clientScopes()).preRemove((RealmModel) params[0]);
@@ -104,4 +96,5 @@ public class CassandraMapDatastoreProviderFactory extends AbstractCassandraProvi
             });
         }
     }
+      */
 }

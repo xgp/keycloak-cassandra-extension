@@ -2,3 +2,9 @@
 target/
 dependency-reduced-pom.xml
 pom.xml.versionsBackup
+
+# ide
+.project
+.settings
+.classpath
+.factorypath
