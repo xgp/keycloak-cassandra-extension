@@ -26,8 +26,6 @@ import org.junit.Test;
 import org.keycloak.common.util.Time;
 import org.keycloak.device.DeviceRepresentationProvider;
 import org.keycloak.models.*;
-import org.keycloak.models.map.storage.chm.ConcurrentHashMapStorageProviderFactory;
-import org.keycloak.models.map.userSession.MapUserSessionProviderFactory;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 

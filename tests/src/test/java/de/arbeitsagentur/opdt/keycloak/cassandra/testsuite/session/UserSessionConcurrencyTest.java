@@ -22,8 +22,6 @@ import de.arbeitsagentur.opdt.keycloak.cassandra.testsuite.RequireProvider;
 import org.junit.Test;
 import org.keycloak.device.DeviceRepresentationProvider;
 import org.keycloak.models.*;
-import org.keycloak.models.map.storage.ModelEntityUtil;
-import org.keycloak.models.map.userSession.MapUserSessionProviderFactory;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 
 import java.util.Map;

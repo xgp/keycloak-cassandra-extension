@@ -21,6 +21,10 @@ import com.datastax.oss.driver.api.querybuilder.SchemaBuilder;
 import com.datastax.oss.driver.api.querybuilder.schema.CreateKeyspace;
 import com.datastax.oss.driver.internal.core.type.codec.extras.enums.EnumNameCodec;
 import com.datastax.oss.driver.internal.core.type.codec.extras.json.JsonCodec;
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
+import com.datastax.oss.driver.api.core.CqlSessionBuilder;
+import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
+
 import com.google.auto.service.AutoService;
 import de.arbeitsagentur.opdt.keycloak.cassandra.CassandraJsonSerialization;
 import de.arbeitsagentur.opdt.keycloak.cassandra.userSession.persistence.entities.AuthenticatedClientSessionValue;
@@ -38,6 +42,7 @@ import org.keycloak.provider.EnvironmentDependentProviderFactory;
 import org.keycloak.sessions.CommonClientSessionModel;
 
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -81,6 +86,8 @@ public class DefaultCassandraConnectionProviderFactory implements CassandraConne
         String password = scope.get("password");
         int replicationFactor = Integer.parseInt(scope.get("replicationFactor"));
 
+        log.infof("Starting cassandra with port=%d, localDatacenter=%s, keyspace=%s, username=%s, password=%s, replicationFactor=%d", port, localDatacenter, keyspace, username, password, replicationFactor);
+        
         List<InetSocketAddress> contactPointsList =
             Arrays.stream(contactPoints.split(","))
                 .map(cp -> new InetSocketAddress(cp, port))
@@ -105,6 +112,18 @@ public class DefaultCassandraConnectionProviderFactory implements CassandraConne
         .build();
     }
 
+  public CqlSessionBuilder configure(CqlSessionBuilder cqlSessionBuilder) {
+    log.info("Configuring CqlSession Builder");
+    return cqlSessionBuilder
+        .withConfigLoader(DriverConfigLoader.programmaticBuilder()
+                          // Resolves the timeout query for create table timed out after PT2S
+                          .withDuration(DefaultDriverOption.METADATA_SCHEMA_REQUEST_TIMEOUT, Duration.ofMillis(60000))
+                          .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, Duration.ofMillis(60000))
+                          .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofMillis(15000))
+                          .build());
+  }
+
+  
     private void createDbIfNotExists(List<InetSocketAddress> contactPointsList, String username, String password, String localDatacenter, String keyspace, int replicationFactor) {
         try (CqlSession createKeyspaceSession =
                 CqlSession.builder()
@@ -117,7 +136,7 @@ public class DefaultCassandraConnectionProviderFactory implements CassandraConne
 
         log.info("Create schema...");
         try (CqlSession createKeyspaceSession =
-                CqlSession.builder()
+             configure(CqlSession.builder())
                     .addContactPoints(contactPointsList)
                     .withAuthCredentials(username, password)
                     .withLocalDatacenter(localDatacenter)
@@ -159,10 +178,14 @@ public class DefaultCassandraConnectionProviderFactory implements CassandraConne
     private void createTables(CqlSession cqlSession, String keyspace) {
         MigrationConfiguration mgConfig = new MigrationConfiguration()
             .withKeyspaceName(keyspace);
+        /*
         Database database = new Database(cqlSession, mgConfig)
             .setConsistencyLevel(ConsistencyLevel.ALL);
-        MigrationTask migration = new MigrationTask(database, new MigrationRepository());
-        migration.migrate();
+        */
+        try (Database database = new Database(cqlSession, mgConfig).setConsistencyLevel(ConsistencyLevel.ONE)) {
+          MigrationTask migration = new MigrationTask(database, new MigrationRepository());
+          migration.migrate();
+        } 
     }
 
 }

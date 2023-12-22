@@ -26,8 +26,6 @@ import de.arbeitsagentur.opdt.keycloak.cassandra.testsuite.KeycloakModelParamete
 import org.keycloak.models.SingleUseObjectSpi;
 import org.keycloak.models.UserLoginFailureSpi;
 import org.keycloak.models.UserSessionSpi;
-import org.keycloak.models.map.storage.MapStorageSpi;
-import org.keycloak.models.map.storage.chm.ConcurrentHashMapStorageProviderFactory;
 import org.keycloak.provider.ProviderFactory;
 import org.keycloak.provider.Spi;
 import org.keycloak.sessions.AuthenticationSessionSpi;
@@ -49,7 +47,6 @@ public class CassandraMapStorage extends KeycloakModelParameters {
 
     static final Set<Class<? extends ProviderFactory>> ALLOWED_FACTORIES = ImmutableSet.<Class<? extends ProviderFactory>>builder()
         .add(CassandraConnectionProviderFactory.class)
-        .add(ConcurrentHashMapStorageProviderFactory.class)
         .add(CassandraMapDatastoreProviderFactory.class)
         .build();
 
@@ -61,11 +58,6 @@ public class CassandraMapStorage extends KeycloakModelParameters {
 
     @Override
     public void updateConfig(Config cf) {
-        cf.spi(MapStorageSpi.NAME).defaultProvider(ConcurrentHashMapStorageProviderFactory.PROVIDER_ID)
-            .spi("datastore").defaultProvider("cassandra-map")
-            .provider(ConcurrentHashMapStorageProviderFactory.PROVIDER_ID)
-            .config("dir", "${project.build.directory:target}");
-
         cf.spi(CassandraConnectionSpi.NAME).provider(DefaultCassandraConnectionProviderFactory.PROVIDER_ID)
             .config("contactPoints", START_CONTAINER ? cassandraContainer.getHost() : "localhost")
             .config("port", START_CONTAINER ? String.valueOf(cassandraContainer.getMappedPort(9042)) : "9042")
