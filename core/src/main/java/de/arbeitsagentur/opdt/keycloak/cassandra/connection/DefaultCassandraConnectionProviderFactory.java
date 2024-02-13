@@ -17,11 +17,14 @@ package de.arbeitsagentur.opdt.keycloak.cassandra.connection;
 
 import com.datastax.oss.driver.api.core.ConsistencyLevel;
 import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.CqlSessionBuilder;
+import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.querybuilder.SchemaBuilder;
 import com.datastax.oss.driver.api.querybuilder.schema.CreateKeyspace;
 import com.datastax.oss.driver.internal.core.type.codec.extras.enums.EnumNameCodec;
 import com.datastax.oss.driver.internal.core.type.codec.extras.json.JsonCodec;
 import com.google.auto.service.AutoService;
+import com.google.common.base.Strings;
 import de.arbeitsagentur.opdt.keycloak.cassandra.CassandraJsonSerialization;
 import de.arbeitsagentur.opdt.keycloak.cassandra.CompositeRepository;
 import de.arbeitsagentur.opdt.keycloak.cassandra.ManagedCompositeCassandraRepository;
@@ -73,6 +76,9 @@ import de.arbeitsagentur.opdt.keycloak.cassandra.userSession.persistence.UserSes
 import de.arbeitsagentur.opdt.keycloak.cassandra.userSession.persistence.entities.AuthenticatedClientSessionValue;
 import java.lang.reflect.Proxy;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -123,37 +129,50 @@ public class DefaultCassandraConnectionProviderFactory
 
   @Override
   public void init(Config.Scope scope) {
-    // kc.spi.cassandra-connection.default.contactPoints
-    // Env: KC_SPI_CASSANDRA_CONNECTION_DEFAULT_CONTACT_POINTS
+    CqlSessionBuilder builder = CqlSession.builder();
 
-    String contactPoints = scope.get("contactPoints");
-    log.infov("Init CassandraProviderFactory with contactPoints {0}", contactPoints);
-
-    int port = Integer.parseInt(scope.get("port"));
-    String localDatacenter = scope.get("localDatacenter");
     String keyspace = scope.get("keyspace");
-    String username = scope.get("username");
-    String password = scope.get("password");
     int replicationFactor = Integer.parseInt(scope.get("replicationFactor"));
 
-    List<InetSocketAddress> contactPointsList =
-        Arrays.stream(contactPoints.split(","))
-            .map(cp -> new InetSocketAddress(cp, port))
-            .collect(Collectors.toList());
+    // first, try the config file
+    String configFile = scope.get("configFile");
+    Path configPath = Paths.get(configFile);
+    if (!Strings.isNullOrEmpty(configFile) && Files.exists(configPath)) {
+      log.infof("Attempting to configure Cassandra with file at %s", configPath);
+      builder = builder.withConfigLoader(DriverConfigLoader.fromPath(configPath));
+    } else { // fall back to other variables if config file is empty or missing
+      // kc.spi.cassandra-connection.default.contactPoints
+      // Env: KC_SPI_CASSANDRA_CONNECTION_DEFAULT_CONTACT_POINTS
+
+      String contactPoints = scope.get("contactPoints");
+      log.infov("Init CassandraProviderFactory with contactPoints {0}", contactPoints);
+
+      int port = Integer.parseInt(scope.get("port"));
+      String localDatacenter = scope.get("localDatacenter");
+      String username = scope.get("username");
+      String password = scope.get("password");
+
+      List<InetSocketAddress> contactPointsList =
+          Arrays.stream(contactPoints.split(","))
+              .map(cp -> new InetSocketAddress(cp, port))
+              .collect(Collectors.toList());
+
+      builder =
+          builder
+              .addContactPoints(contactPointsList)
+              .withAuthCredentials(username, password)
+              .withLocalDatacenter(localDatacenter);
+    }
 
     if (scope.getBoolean("createKeyspace", true)) {
       log.info("Create keyspace (if not exists)...");
-      createDbIfNotExists(
-          contactPointsList, username, password, localDatacenter, keyspace, replicationFactor);
+      createDbIfNotExists(builder, keyspace, replicationFactor);
     } else {
       log.info("Skipping create keyspace, assuming keyspace and tables already exist...");
     }
 
     cqlSession =
-        CqlSession.builder()
-            .addContactPoints(contactPointsList)
-            .withAuthCredentials(username, password)
-            .withLocalDatacenter(localDatacenter)
+        builder
             .withKeyspace(keyspace)
             .addTypeCodecs(new EnumNameCodec<>(UserSessionModel.State.class))
             .addTypeCodecs(new EnumNameCodec<>(UserSessionModel.SessionPersistenceState.class))
@@ -174,29 +193,13 @@ public class DefaultCassandraConnectionProviderFactory
   }
 
   private void createDbIfNotExists(
-      List<InetSocketAddress> contactPointsList,
-      String username,
-      String password,
-      String localDatacenter,
-      String keyspace,
-      int replicationFactor) {
-    try (CqlSession createKeyspaceSession =
-        CqlSession.builder()
-            .addContactPoints(contactPointsList)
-            .withAuthCredentials(username, password)
-            .withLocalDatacenter(localDatacenter)
-            .build()) {
+      CqlSessionBuilder builder, String keyspace, int replicationFactor) {
+    try (CqlSession createKeyspaceSession = builder.build()) {
       createKeyspaceIfNotExists(createKeyspaceSession, keyspace, replicationFactor);
     }
 
     log.info("Create schema...");
-    try (CqlSession createKeyspaceSession =
-        CqlSession.builder()
-            .addContactPoints(contactPointsList)
-            .withAuthCredentials(username, password)
-            .withLocalDatacenter(localDatacenter)
-            .withKeyspace(keyspace)
-            .build()) {
+    try (CqlSession createKeyspaceSession = builder.withKeyspace(keyspace).build()) {
       createTables(createKeyspaceSession, keyspace);
     }
   }
