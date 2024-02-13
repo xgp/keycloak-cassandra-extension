@@ -71,6 +71,13 @@ public class CassandraMapStorage extends KeycloakModelParameters {
         .config("username", "cassandra")
         .config("password", "cassandra")
         .config("replicationFactor", "1");
+    /*
+    cf.spi(CassandraConnectionSpi.NAME)
+        .provider(DefaultCassandraConnectionProviderFactory.PROVIDER_ID)
+        .config("configFile", "src/test/resources/application.conf")
+        .config("keyspace", "test")
+        .config("replicationFactor", "1");
+    */
   }
 
   @Override
