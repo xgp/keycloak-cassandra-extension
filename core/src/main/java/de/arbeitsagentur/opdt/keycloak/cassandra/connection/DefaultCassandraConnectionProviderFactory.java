@@ -134,7 +134,7 @@ public class DefaultCassandraConnectionProviderFactory
     String keyspace = scope.get("keyspace");
     int replicationFactor = Integer.parseInt(scope.get("replicationFactor"));
 
-    // first, try the config file
+    // first, try the config file, which takes precedence.
     String configFile = scope.get("configFile");
     Path configPath = Paths.get(configFile);
     if (!Strings.isNullOrEmpty(configFile) && Files.exists(configPath)) {
@@ -157,11 +157,17 @@ public class DefaultCassandraConnectionProviderFactory
               .map(cp -> new InetSocketAddress(cp, port))
               .collect(Collectors.toList());
 
-      builder =
-          builder
-              .addContactPoints(contactPointsList)
-              .withAuthCredentials(username, password)
-              .withLocalDatacenter(localDatacenter);
+      builder = builder.addContactPoints(contactPointsList).withLocalDatacenter(localDatacenter);
+    }
+
+    // credentials from user/pass or token. token takes precedence.
+    String username = scope.get("username");
+    String password = scope.get("password");
+    String token = scope.get("token");
+    if (!Strings.isNullOrEmpty(token)) {
+      builder = builder.withAuthCredentials("token", token);
+    } else {
+      builder = builder.withAuthCredentials(username, password);
     }
 
     if (scope.getBoolean("createKeyspace", true)) {

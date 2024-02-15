@@ -32,7 +32,8 @@ The following parameters might be needed in addition to the configuration option
 
 | CLI-Parameter                                         | Description                                                                             |
 |-------------------------------------------------------|-----------------------------------------------------------------------------------------|
-| --spi-cassandra-connection-default-config-fil         | Cassandra configuration file (will override all other values if present). Reference format (https://docs.datastax.com/en/developer/java-driver/4.17/manual/core/configuration/reference/) |
+| --spi-cassandra-connection-default-config-file        | Cassandra configuration file (will override all other values if present). Reference format (https://docs.datastax.com/en/developer/java-driver/4.17/manual/core/configuration/reference/) |
+| --spi-cassandra-connection-default-token              | Cassandra token. Use in conjunction with a config file if you are using hosted Astra DB. |
 | --spi-cassandra-connection-default-port               | Cassandra CQL-Port                                                                      |
 | --spi-cassandra-connection-default-contact-points     | Comma-separated list of cassandra node-endpoints                                        |
 | --spi-cassandra-connection-default-local-datacenter   | Local datacenter name                                                                   |
