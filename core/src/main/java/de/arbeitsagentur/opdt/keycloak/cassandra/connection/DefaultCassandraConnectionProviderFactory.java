@@ -17,14 +17,12 @@ package de.arbeitsagentur.opdt.keycloak.cassandra.connection;
 
 import com.datastax.oss.driver.api.core.ConsistencyLevel;
 import com.datastax.oss.driver.api.core.CqlSession;
-import com.datastax.oss.driver.api.core.CqlSessionBuilder;
-import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
+import com.datastax.oss.driver.api.core.DefaultConsistencyLevel;
 import com.datastax.oss.driver.api.querybuilder.SchemaBuilder;
 import com.datastax.oss.driver.api.querybuilder.schema.CreateKeyspace;
 import com.datastax.oss.driver.internal.core.type.codec.extras.enums.EnumNameCodec;
 import com.datastax.oss.driver.internal.core.type.codec.extras.json.JsonCodec;
 import com.google.auto.service.AutoService;
-import com.google.common.base.Strings;
 import de.arbeitsagentur.opdt.keycloak.cassandra.CassandraJsonSerialization;
 import de.arbeitsagentur.opdt.keycloak.cassandra.CompositeRepository;
 import de.arbeitsagentur.opdt.keycloak.cassandra.ManagedCompositeCassandraRepository;
@@ -76,9 +74,6 @@ import de.arbeitsagentur.opdt.keycloak.cassandra.userSession.persistence.UserSes
 import de.arbeitsagentur.opdt.keycloak.cassandra.userSession.persistence.entities.AuthenticatedClientSessionValue;
 import java.lang.reflect.Proxy;
 import java.net.InetSocketAddress;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -101,8 +96,8 @@ public class DefaultCassandraConnectionProviderFactory
     implements CassandraConnectionProviderFactory<CassandraConnectionProvider>,
         EnvironmentDependentProviderFactory {
   public static final String PROVIDER_ID = "default";
-  private CqlSession cqlSession;
-  private CompositeRepository repository;
+  protected CqlSession cqlSession;
+  protected CompositeRepository repository;
 
   @Override
   public CassandraConnectionProvider create(KeycloakSession session) {
@@ -129,56 +124,58 @@ public class DefaultCassandraConnectionProviderFactory
 
   @Override
   public void init(Config.Scope scope) {
-    CqlSessionBuilder builder = CqlSession.builder();
+    // kc.spi.cassandra-connection.default.contactPoints
+    // Env: KC_SPI_CASSANDRA_CONNECTION_DEFAULT_CONTACT_POINTS
 
+    String contactPoints = scope.get("contactPoints");
+    log.infov("Init CassandraProviderFactory with contactPoints {0}", contactPoints);
+
+    int port = Integer.parseInt(scope.get("port"));
+    String localDatacenter = scope.get("localDatacenter");
     String keyspace = scope.get("keyspace");
-    int replicationFactor = Integer.parseInt(scope.get("replicationFactor"));
-
-    // first, try the config file, which takes precedence.
-    String configFile = scope.get("configFile");
-    Path configPath = Paths.get(configFile);
-    if (!Strings.isNullOrEmpty(configFile) && Files.exists(configPath)) {
-      log.infof("Attempting to configure Cassandra with file at %s", configPath);
-      builder = builder.withConfigLoader(DriverConfigLoader.fromPath(configPath));
-    } else { // fall back to other variables if config file is empty or missing
-      // kc.spi.cassandra-connection.default.contactPoints
-      // Env: KC_SPI_CASSANDRA_CONNECTION_DEFAULT_CONTACT_POINTS
-
-      String contactPoints = scope.get("contactPoints");
-      log.infov("Init CassandraProviderFactory with contactPoints {0}", contactPoints);
-
-      int port = Integer.parseInt(scope.get("port"));
-      String localDatacenter = scope.get("localDatacenter");
-      String username = scope.get("username");
-      String password = scope.get("password");
-
-      List<InetSocketAddress> contactPointsList =
-          Arrays.stream(contactPoints.split(","))
-              .map(cp -> new InetSocketAddress(cp, port))
-              .collect(Collectors.toList());
-
-      builder = builder.addContactPoints(contactPointsList).withLocalDatacenter(localDatacenter);
-    }
-
-    // credentials from user/pass or token. token takes precedence.
     String username = scope.get("username");
     String password = scope.get("password");
-    String token = scope.get("token");
-    if (!Strings.isNullOrEmpty(token)) {
-      builder = builder.withAuthCredentials("token", token);
-    } else {
-      builder = builder.withAuthCredentials(username, password);
-    }
+    int replicationFactor = Integer.parseInt(scope.get("replicationFactor"));
+
+    List<InetSocketAddress> contactPointsList =
+        Arrays.stream(contactPoints.split(","))
+            .map(cp -> new InetSocketAddress(cp, port))
+            .collect(Collectors.toList());
 
     if (scope.getBoolean("createKeyspace", true)) {
       log.info("Create keyspace (if not exists)...");
-      createDbIfNotExists(builder, keyspace, replicationFactor);
+      try (CqlSession createKeyspaceSession =
+          CqlSession.builder()
+              .addContactPoints(contactPointsList)
+              .withAuthCredentials(username, password)
+              .withLocalDatacenter(localDatacenter)
+              .build()) {
+        createKeyspaceIfNotExists(createKeyspaceSession, keyspace, replicationFactor);
+      }
     } else {
-      log.info("Skipping create keyspace, assuming keyspace and tables already exist...");
+      log.info("Skipping create keyspace, assuming keyspace already exists...");
+    }
+
+    if (scope.getBoolean("createSchema", true)) {
+      log.info("Create schema...");
+      ConsistencyLevel migrationConsistencyLevel =
+          DefaultConsistencyLevel.valueOf(scope.get("migrationConsistencyLevel", "ALL"));
+      createDbIfNotExists(
+          contactPointsList,
+          username,
+          password,
+          localDatacenter,
+          keyspace,
+          migrationConsistencyLevel);
+    } else {
+      log.info("Skipping schema creation...");
     }
 
     cqlSession =
-        builder
+        CqlSession.builder()
+            .addContactPoints(contactPointsList)
+            .withAuthCredentials(username, password)
+            .withLocalDatacenter(localDatacenter)
             .withKeyspace(keyspace)
             .addTypeCodecs(new EnumNameCodec<>(UserSessionModel.State.class))
             .addTypeCodecs(new EnumNameCodec<>(UserSessionModel.SessionPersistenceState.class))
@@ -198,15 +195,21 @@ public class DefaultCassandraConnectionProviderFactory
     repository = createRepository(cqlSession);
   }
 
-  private void createDbIfNotExists(
-      CqlSessionBuilder builder, String keyspace, int replicationFactor) {
-    try (CqlSession createKeyspaceSession = builder.build()) {
-      createKeyspaceIfNotExists(createKeyspaceSession, keyspace, replicationFactor);
-    }
-
-    log.info("Create schema...");
-    try (CqlSession createKeyspaceSession = builder.withKeyspace(keyspace).build()) {
-      createTables(createKeyspaceSession, keyspace);
+  protected void createDbIfNotExists(
+      List<InetSocketAddress> contactPointsList,
+      String username,
+      String password,
+      String localDatacenter,
+      String keyspace,
+      ConsistencyLevel migrationConsistencyLevel) {
+    try (CqlSession createKeyspaceSession =
+        CqlSession.builder()
+            .addContactPoints(contactPointsList)
+            .withAuthCredentials(username, password)
+            .withLocalDatacenter(localDatacenter)
+            .withKeyspace(keyspace)
+            .build()) {
+      createTables(createKeyspaceSession, keyspace, migrationConsistencyLevel);
     }
   }
 
@@ -228,7 +231,7 @@ public class DefaultCassandraConnectionProviderFactory
     cqlSession.close();
   }
 
-  private void createKeyspaceIfNotExists(
+  protected void createKeyspaceIfNotExists(
       CqlSession cqlSession, String keyspaceName, int replicationFactor) {
     CreateKeyspace createKeyspace =
         SchemaBuilder.createKeyspace(keyspaceName)
@@ -242,15 +245,16 @@ public class DefaultCassandraConnectionProviderFactory
     cqlSession.close();
   }
 
-  private void createTables(CqlSession cqlSession, String keyspace) {
+  protected void createTables(
+      CqlSession cqlSession, String keyspace, ConsistencyLevel migrationConsistencyLevel) {
     MigrationConfiguration mgConfig = new MigrationConfiguration().withKeyspaceName(keyspace);
     Database database =
-        new Database(cqlSession, mgConfig).setConsistencyLevel(ConsistencyLevel.ALL);
+        new Database(cqlSession, mgConfig).setConsistencyLevel(migrationConsistencyLevel);
     MigrationTask migration = new MigrationTask(database, new MigrationRepository());
     migration.migrate();
   }
 
-  private CompositeRepository createRepository(CqlSession cqlSession) {
+  protected CompositeRepository createRepository(CqlSession cqlSession) {
     UserMapper userMapper =
         new UserMapperBuilder(cqlSession).withSchemaValidationEnabled(false).build();
     UserRepository userRepository = new CassandraUserRepository(userMapper.userDao());
